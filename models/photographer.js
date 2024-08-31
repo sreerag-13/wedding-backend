@@ -8,7 +8,8 @@ let schema=mongoose.Schema({
     "state":{type:String,require:true},
     "City":{type:String,require:true},
     "experience":{type:String,require:true},
-    "Description":{type:String,require:true}
+    "Description":{type:String,require:true},
+    "Pimage":{type:String,require:true}
 
 
 })

@@ -25,6 +25,7 @@ photomodel.find({Email:req.body.Email}).then((items)=>{
     }
 })
 
+
 })
 app.listen("8082",()=>{
 console.log("server start")
