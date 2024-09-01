@@ -2,6 +2,7 @@ const express = require("express");
 const cors = require("cors");
 const mongoose = require("mongoose");
 const bcrypt = require("bcrypt");
+const jwt=require("jsonwebtoken")
 const { photomodel } = require("./models/photographer");
 const path = require("path"); // Required for serving static files
 
@@ -48,6 +49,38 @@ app.get("/viewall", async (req, res) => {
     }
   });
   
+
+  app.post("/photosignin",(req,res)=>{
+    let input=req.body
+    photomodel.find({"Email":req.body.Email}).then((response)=>{
+      if(response.length>0)
+        {
+           const dpassword=bcrypt.compareSync(input.Password,response[0].Password)
+            if(dpassword)
+                {
+                    jwt.sign({Email:input.Email},"WeddingApp",{expiresIn:"1d"},(error,token)=>{
+                        if(error)
+                        {
+                            res.json({"status":"eroor","errorMessage":error}) 
+                        }
+                        else{
+                            res.json({"status":"success","token":token,"userid":response[0]._id})
+                        }
+                    })
+                   
+                }
+                else{
+                    res.json({"status":"incorrect password"})
+                }
+            }
+        else{
+            res.json({"status":"incorrect email"})
+        }
+    }
+    )
+    .catch()
+    }
+    )
 
 // Start the server
 app.listen(8082, () => {
