@@ -5,6 +5,7 @@ const bcrypt = require("bcrypt");
 const jwt=require("jsonwebtoken")
 const { photomodel } = require("./models/photographer");
 const path = require("path"); // Required for serving static files
+const { photopostmodel } = require("./models/photographpost");
 
 let app = express();
 app.use(cors());
@@ -21,6 +22,7 @@ mongoose.connect("mongodb+srv://sreerag:sreerag@cluster0.onuj57g.mongodb.net/wed
 // API to handle photographer signup
 app.post("/photosignup", async (req, res) => {
   const input = req.body;
+  console.log(input)
   const hashedPassword = bcrypt.hashSync(req.body.Password, 10);
   req.body.Password = hashedPassword;
 
@@ -52,6 +54,7 @@ app.get("/viewall", async (req, res) => {
 
   app.post("/photosignin",(req,res)=>{
     let input=req.body
+    console.log(input)
     photomodel.find({"Email":req.body.Email}).then((response)=>{
       if(response.length>0)
         {
@@ -81,6 +84,57 @@ app.get("/viewall", async (req, res) => {
     .catch()
     }
     )
+ 
+   app.post("/createphoto", async(req,res) => {
+      let input =req.body;
+      let token =req.headers.token;
+      console.log(input)
+      console.log(token)
+    
+      jwt.verify(token,"WeddingApp",async(error,decoded) => {
+        console.log(decoded)
+        if (decoded) {
+          let result =new photopostmodel(input);
+          console.log(result)
+          await result.save();
+          res.json({ "status": "status done" });
+        } else {
+          res.json({ "status": "invalid auth" });
+        }
+      });
+    }); 
+
+   /* app.post("/createphoto", async (req, res) => {
+      try {
+        const token = req.headers.token;
+    
+        // Verify JWT token
+        jwt.verify(token, process.env.JWT_SECRET, (error, decoded) => {
+          if (error) {
+            return res.status(401).json({ "status": "invalid auth" });
+          }
+    
+          if (!decoded) {
+            return res.status(401).json({ "status": "invalid auth" });
+          }
+    
+          // Create new photopostmodel instance
+          const result = new photopostmodel(req.body);
+    
+          // Save the result
+          try {
+            result.save();
+            res.json({ "status": "status done" });
+          } catch (error) {
+            console.error(error);
+            res.status(500).json({ "status": "internal server error" });
+          }
+        });
+      } catch (error) {
+        console.error(error);
+        res.status(500).json({ "status": "internal server error" });
+      }
+    }); */
 
 // Start the server
 app.listen(8082, () => {
