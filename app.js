@@ -5,6 +5,7 @@ const bcrypt = require("bcrypt");
 const jwt=require("jsonwebtoken")
 const { photomodel } = require("./models/photographer");
 const path = require("path"); // Required for serving static files
+const { photopostmodel } = require("./models/photographpost");
 
 let app = express();
 app.use(cors());
@@ -21,6 +22,13 @@ mongoose.connect("mongodb+srv://sreerag:sreerag@cluster0.onuj57g.mongodb.net/wed
 // API to handle photographer signup
 app.post("/photosignup", async (req, res) => {
   const input = req.body;
+  console.log(input)
+   // Example input structure: { Pimage: "C:\\fakepath\\dog.jpg", PName: "John Doe" }
+   const fullPath = input.Pimage; // Get the full path of the image
+        
+   // Extract the filename using path.basename
+   const fileName = path.basename(fullPath); // This will get only 'dog.jpg'
+   input.Pimage=fileName;
   const hashedPassword = bcrypt.hashSync(req.body.Password, 10);
   req.body.Password = hashedPassword;
 
@@ -50,38 +58,136 @@ app.get("/viewall", async (req, res) => {
   });
   
 
-  app.post("/photosignin",(req,res)=>{
-    let input=req.body
-    photomodel.find({"Email":req.body.Email}).then((response)=>{
-      if(response.length>0)
-        {
-           const dpassword=bcrypt.compareSync(input.Password,response[0].Password)
-            if(dpassword)
-                {
-                    jwt.sign({Email:input.Email},"WeddingApp",{expiresIn:"1d"},(error,token)=>{
-                        if(error)
-                        {
-                            res.json({"status":"eroor","errorMessage":error}) 
+  app.post("/photosignin", (req, res) => {
+    let input = req.body;
+
+    photomodel.findOne({ "Email": req.body.Email })
+        .then((response) => {
+            if (response) {
+                const dpassword = bcrypt.compareSync(input.Password, response.Password);
+                if (dpassword) {
+                    // Sign the JWT token
+                    jwt.sign({ Email: input.Email }, "WeddingApp", { expiresIn: "1d" }, (error, token) => {
+                        if (error) {
+                            res.json({ "status": "error", "errorMessage": error });
+                        } else {
+                            // Include Pimage and PName in the response
+                            res.json({
+                                "status": "success",
+                                "token": token,
+                                "userId": response._id,
+                                "Pimage": response.Pimage,  // Send Pimage
+                                "PName": response.PName      // Send PName
+                            });
                         }
-                        else{
-                            res.json({"status":"success","token":token,"userid":response[0]._id})
+                    });
+                } else {
+                    res.json({ "status": "incorrect password" });
+                }
+            } else {
+                res.json({ "status": "incorrect email" });
+            }
+        })
+        .catch((error) => {
+            res.json({ "status": "error", "message": error.message });
+        });
+});
+ 
+   app.post("/createphoto", async(req,res) => {
+      let input =req.body;
+      let token =req.headers.token;
+      console.log(input)
+      console.log(token)
+    
+      jwt.verify(token,"WeddingApp",async(error,decoded) => {
+        console.log(decoded)
+        if (decoded) {
+          let result =new photopostmodel(input);
+          console.log(result)
+          await result.save();
+          res.json({ "status": "status done" });
+        } else {
+          res.json({ "status": "invalid auth" });
+        }
+      });
+    }); 
+
+   /* app.post("/createphoto", async (req, res) => {
+      try {
+        const token = req.headers.token;
+    
+        // Verify JWT token
+        jwt.verify(token, process.env.JWT_SECRET, (error, decoded) => {
+          if (error) {
+            return res.status(401).json({ "status": "invalid auth" });
+          }
+    
+          if (!decoded) {
+            return res.status(401).json({ "status": "invalid auth" });
+          }
+    
+          // Create new photopostmodel instance
+          const result = new photopostmodel(req.body);
+    
+          // Save the result
+          try {
+            result.save();
+            res.json({ "status": "status done" });
+          } catch (error) {
+            console.error(error);
+            res.status(500).json({ "status": "internal server error" });
+          }
+        });
+      } catch (error) {
+        console.error(error);
+        res.status(500).json({ "status": "internal server error" });
+      }
+    }); */
+   /*app.post("/photoprofile",(req,res)=>{
+      let input=req.body
+      console.log(input)
+      let token=req.headers.token
+      console.log(token)
+      jwt.verify(token,"WeddingApp",(error,decoded)=>{
+          if (decoded && decoded.Email) {
+            photomodel.find(input).then((items)=>{
+              if (items) {
+                console.log(items)
+                res.json(items)
+              } else {
+                res.json({"status":"no items found"})
+              }
+            }).catch((error)=>{
+              res.json({"status":"error"})
+            })
+          } else {
+            res.json({"status":"invalid auther"})
+          }
+      })
+    })  */
+      app.post("/photoprofile", (req, res) => {
+        let token = req.headers.token;
+        
+        jwt.verify(token, "WeddingApp", (error, decoded) => {
+            if (decoded) {
+                photomodel.findOne({ Email: decoded.Email })
+                    .populate('userId', 'PName Pimage Phone') // Adjust as per your schema
+                    .then((items) => {
+                        if (items) {
+                            res.json(items);
+                        } else {
+                            res.json({ "status": "no items found" });
                         }
                     })
-                   
-                }
-                else{
-                    res.json({"status":"incorrect password"})
-                }
+                    .catch((error) => {
+                        res.json({ "status": "error" });
+                    });
+            } else {
+                res.json({ "status": "invalid authentication" });
             }
-        else{
-            res.json({"status":"incorrect email"})
-        }
-    }
-    )
-    .catch()
-    }
-    )
-
+        });
+    });
+        
 // Start the server
 app.listen(8082, () => {
   console.log("Server started on port 8082");
