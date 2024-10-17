@@ -12,3 +12,4 @@ const uschema=Mongoose.Schema({
 })
 var usermodel=Mongoose.model("user",uschema);
 module.exports={usermodel}
+

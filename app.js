@@ -141,6 +141,7 @@ app.post("/photosignin", (req, res) => {
     });
 });
 // User Signin Route
+// User Signin Route
 app.post('/usersignin', async (req, res) => {
   const { Email, Password } = req.body;
 
@@ -156,16 +157,12 @@ app.post('/usersignin', async (req, res) => {
     }
 
     // Generate JWT token
-    jwt.sign({ Email }, 'UserApp', { expiresIn: '1d' }, (error, token) => {
-      if (error) {
-        return res.status(500).json({ status: 'error', message: error.message });
-      }
-      res.json({
-        status: 'success',
-        token,
-        userId: user._id,
-        UName: user.UName,
-      });
+    const token = jwt.sign({ Email }, 'WeddingApp', { expiresIn: '1d' }); // Use the same secret
+    res.json({
+      status: 'success',
+      token,
+      userId: user._id,
+      UName: user.UName,
     });
   } catch (error) {
     res.status(500).json({ status: 'error', message: error.message });
@@ -312,24 +309,21 @@ app.post('/get-pricing', async (req, res) => {
 
 
 app.post("/view-my-posts", async (req, res) => {
-  const token = req.body.token;
+  const { token, userId } = req.body;
 
-  if (!token) {
-    return res.status(401).json({ message: "Token is required" });
+  if (!token || !userId) {
+    return res.status(401).json({ message: "Token and userId are required" });
   }
 
   jwt.verify(token, "WeddingApp", async (error, decoded) => {
     if (error || !decoded) {
       console.log("Error verifying token:", error);
-      return res.status(401).json({ status: "Invalid authentication" });
+      return res.status(401).json({ message: "Invalid authentication" });
     }
 
-    const userId = req.body.userId;
-    console.log("User ID:", userId);
-
     try {
-      const userPosts = await photopostmodel.find({ userId: new mongoose.Types.ObjectId(userId) }).exec();
-      console.log("User Posts:", userPosts); // Log the posts being returned
+      const userPosts = await photopostmodel.find({ userId }).exec();
+      console.log("User Posts:", userPosts); // Debug log
 
       if (userPosts.length === 0) {
         return res.status(404).json({ message: "No posts found for this user" });
@@ -341,6 +335,54 @@ app.post("/view-my-posts", async (req, res) => {
       res.status(500).json({ message: "Error fetching posts", error });
     }
   });
+}); 
+
+app.use(express.json()); // Middleware to parse JSON bodies
+
+app.post("/view-photographer-posts", async (req, res) => {
+    const { token, photographerId } = req.body;
+
+    // Verify the token
+    jwt.verify(token, "WeddingApp", async (error, decoded) => {
+        if (error) {
+            console.error("Token verification failed:", error.message); // Log error message
+            return res.status(401).json({ message: "Invalid authentication", error: error.message });
+        }
+
+        try {
+            const posts = await photopostmodel.find({ userId: photographerId }).exec();
+            res.json({ posts });
+        } catch (error) {
+            console.error("Error fetching posts:", error);
+            res.status(500).json({ message: "Error fetching posts", error });
+        }
+    });
+});
+
+app.post("/pricing", async (req, res) => {
+  const { userId } = req.body; // Get userId from the request body
+
+  if (!userId) {
+      return res.status(400).json({ status: "error", message: "User ID is required" });
+  }
+
+  try {
+      // Fetch pricing details for the given user
+      const pricingDetails = await pricingmodel
+          .find({ userId })
+          .populate("userId", "PName");
+
+      if (!pricingDetails.length) {
+          return res.status(404).json({ status: "error", message: "No pricing found for this photographer" });
+      }
+
+      res.status(200).json({
+          status: "success",
+          data: pricingDetails,
+      });
+  } catch (error) {
+      res.status(500).json({ status: "error", message: error.message });
+  }
 });
 
 // Existing API for photographer profile
