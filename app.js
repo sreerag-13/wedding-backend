@@ -9,6 +9,8 @@ const { photomodel } = require("./models/photographer");
 const { photopostmodel } = require("./models/photographpost");
 
 const fs = require('fs');
+const { usermodel } = require("./models/user");
+const { pricingmodel } = require("./models/Ppricing");
 
 let app = express();
 app.use(cors());
@@ -59,15 +61,51 @@ app.post("/photosignup", async (req, res) => {
   }
 });
 
-// Existing API to view all photographers
-app.get("/viewall", async (req, res) => {
+
+
+app.post("/usersignup", async (req, res) => {
+  const input = req.body;
+
   try {
-    const photographers = await photomodel.find();
-    res.json(photographers);
+    // Hash the password
+    const hashedPassword = bcrypt.hashSync(input.Password, 10);
+    input.Password = hashedPassword;
+
+    // Check if the email already exists
+    const existingUser = await usermodel.findOne({ Email: input.Email });
+    if (existingUser) {
+      return res.json({ status: "email already exists" });
+    }
+
+    // Create and save the new user
+    const newUser = new usermodel(input);
+    await newUser.save();
+
+    // Generate JWT token
+    const token = jwt.sign({ Email: input.Email }, "UserApp", { expiresIn: "1d" });
+
+    // Log the token in the terminal
+    console.log("JWT Token:", token);
+
+    // Respond to the client
+    res.json({ status: "success", token });
   } catch (error) {
-    res.status(500).json({ status: "error", message: "Error fetching data" });
+    console.error("Error saving user:", error);
+    res.json({ status: "error", message: error.message });
   }
 });
+
+
+app.post("/viewallp", async (req, res) => {
+  try {
+    // Fetch all photographers, excluding passwords for security
+    const photographers = await photomodel.find().select('-Password');
+    res.status(200).json(photographers);
+  } catch (error) {
+    res.status(500).json({ message: "Error fetching photographers", error });
+  }
+});
+
 
 // Existing photographer signin API with JWT
 app.post("/photosignin", (req, res) => {
@@ -102,6 +140,38 @@ app.post("/photosignin", (req, res) => {
       res.json({ "status": "error", "message": error.message });
     });
 });
+// User Signin Route
+// User Signin Route
+app.post('/usersignin', async (req, res) => {
+  const { Email, Password } = req.body;
+
+  try {
+    const user = await usermodel.findOne({ Email });
+    if (!user) {
+      return res.status(400).json({ status: 'error', message: 'Incorrect email' });
+    }
+
+    const isPasswordValid = bcrypt.compareSync(Password, user.Password);
+    if (!isPasswordValid) {
+      return res.status(400).json({ status: 'error', message: 'Incorrect password' });
+    }
+
+    // Generate JWT token
+    const token = jwt.sign({ Email }, 'WeddingApp', { expiresIn: '1d' }); // Use the same secret
+    res.json({
+      status: 'success',
+      token,
+      userId: user._id,
+      UName: user.UName,
+    });
+  } catch (error) {
+    res.status(500).json({ status: 'error', message: error.message });
+  }
+});
+
+
+
+
 
 // Existing API to create a post with JWT authentication (without file upload)
 /*app.post("/createphoto", async (req, res) => {
@@ -178,15 +248,140 @@ app.post("/create-post", upload.array('postImage', 3), async (req, res) => {
 });
 
 
-// Existing API to fetch the logged-in user's posts
-app.get("/my-posts/:userId", async (req, res) => {
-  const { userId } = req.params;
+app.post("/create-pricing", async (req, res) => {
+  console.log("Reached /create-pricing route");
+  console.log("Request Body:", req.body);
+
+  const { token } = req.headers;
+  const { packageName, price, duration, userId } = req.body;
+
+  if (!token || !packageName || !price || !userId) {
+      console.log("Missing required fields");
+      return res.status(400).json({ message: "All fields are required" });
+  }
+
+  jwt.verify(token, "WeddingApp", async (error, decoded) => {
+      if (error) {
+          if (error.name === "TokenExpiredError") {
+              console.log("Token expired. Generating a new token...");
+
+              // Generate a new token with a 1-day expiration
+              const newToken = jwt.sign({ userId }, "WeddingApp", { expiresIn: "1d" });
+
+              res.setHeader("new-token", newToken); // Optional: Send the new token to the frontend
+              console.log("New token issued:", newToken);
+
+              // Proceed with creating the pricing entry
+          } else {
+              console.error("Invalid token:", error);
+              return res.status(401).json({ message: "Invalid token" });
+          }
+      }
+
+      try {
+          // Create a new pricing entry
+          const newPricing = new pricingmodel({
+              userId: new mongoose.Types.ObjectId(userId),
+              packageName,
+              price,
+              duration,
+          });
+
+          console.log("New pricing created:", newPricing);
+          await newPricing.save();
+
+          res.status(201).json({ message: "Pricing created successfully", pricing: newPricing });
+      } catch (error) {
+          console.error("Error creating pricing:", error);
+          res.status(500).json({ message: "Error creating pricing", error });
+      }
+  });
+});
+
+app.post('/get-pricing', async (req, res) => {
+  try {
+    const pricingData = await pricingmodel.find();
+    res.json(pricingData);
+  } catch (error) {
+    res.status(500).json({ message: 'Failed to fetch pricing data', error });
+  }
+});
+
+
+app.post("/view-my-posts", async (req, res) => {
+  const { token, userId } = req.body;
+
+  if (!token || !userId) {
+    return res.status(401).json({ message: "Token and userId are required" });
+  }
+
+  jwt.verify(token, "WeddingApp", async (error, decoded) => {
+    if (error || !decoded) {
+      console.log("Error verifying token:", error);
+      return res.status(401).json({ message: "Invalid authentication" });
+    }
+
+    try {
+      const userPosts = await photopostmodel.find({ userId }).exec();
+      console.log("User Posts:", userPosts); // Debug log
+
+      if (userPosts.length === 0) {
+        return res.status(404).json({ message: "No posts found for this user" });
+      }
+
+      res.status(200).json({ message: "Posts fetched successfully", posts: userPosts });
+    } catch (error) {
+      console.error("Error fetching posts:", error);
+      res.status(500).json({ message: "Error fetching posts", error });
+    }
+  });
+}); 
+
+app.use(express.json()); // Middleware to parse JSON bodies
+
+app.post("/view-photographer-posts", async (req, res) => {
+    const { token, photographerId } = req.body;
+
+    // Verify the token
+    jwt.verify(token, "WeddingApp", async (error, decoded) => {
+        if (error) {
+            console.error("Token verification failed:", error.message); // Log error message
+            return res.status(401).json({ message: "Invalid authentication", error: error.message });
+        }
+
+        try {
+            const posts = await photopostmodel.find({ userId: photographerId }).exec();
+            res.json({ posts });
+        } catch (error) {
+            console.error("Error fetching posts:", error);
+            res.status(500).json({ message: "Error fetching posts", error });
+        }
+    });
+});
+
+app.post("/pricing", async (req, res) => {
+  const { userId } = req.body; // Get userId from the request body
+
+  if (!userId) {
+      return res.status(400).json({ status: "error", message: "User ID is required" });
+  }
 
   try {
-    const posts = await photopostmodel.find({ userId }).populate('userId');
-    res.status(200).json(posts);
+      // Fetch pricing details for the given user
+      const pricingDetails = await pricingmodel
+          .find({ userId })
+          .populate("userId", "PName");
+
+      if (!pricingDetails.length) {
+          return res.status(404).json({ status: "error", message: "No pricing found for this photographer" });
+      }
+
+      res.status(200).json({
+          status: "success",
+          data: pricingDetails,
+      });
   } catch (error) {
-    res.status(500).json({ message: "Error fetching posts", error });
+      res.status(500).json({ status: "error", message: error.message });
   }
 });
 
