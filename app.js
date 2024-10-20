@@ -15,6 +15,7 @@ const { bookingModel } = require("./models/booking");
 const { adminmodel } = require("./models/admin");
 const { audimodel } = require("./models/auditorium");
 const { amodel } = require("./models/auditoriumpost");
+const { audipmodel } = require("./models/Apricing");
 
 let app = express();
 app.use(cors());
@@ -155,10 +156,12 @@ app.post("/viewallp", async (req, res) => {
     res.status(500).json({ message: "Error fetching photographers", error });
   }
 });
+
 app.post("/viewallA", async (req, res) => {
   try {
     // Fetch all photographers, excluding passwords for security
     const auditorium = await audimodel.find().select('-Password');
+    console.log(auditorium)
     res.status(200).json(auditorium);
   } catch (error) {
     res.status(500).json({ message: "Error fetching photographers", error });
@@ -478,6 +481,57 @@ app.post("/create-pricing", async (req, res) => {
   });
 });
 
+app.post("/create-auditorium-pricing", async (req, res) => {
+  console.log("Reached /create-auditorium-pricing route");
+  console.log("Request Body:", req.body);
+
+  const { userId, Capacity, price, type, duration } = req.body;
+
+  // Check for required fields in the request body
+  if (!userId || !Capacity || !price) {
+      console.log("Missing required fields");
+      return res.status(400).json({ message: "All fields are required" });
+  }
+
+  try {
+      // Create a new auditorium pricing entry
+      const newPricing = new audipmodel({
+          userId: new mongoose.Types.ObjectId(userId),
+          Capacity,
+          price,
+          type,
+          duration, // Include duration
+      });
+
+      console.log("New auditorium pricing created:", newPricing);
+      await newPricing.save();
+
+      res.status(201).json({ message: "Auditorium pricing created successfully", pricing: newPricing });
+  } catch (error) {
+      console.error("Error creating auditorium pricing:", error);
+      res.status(500).json({ message: "Error creating auditorium pricing", error });
+  }
+});
+
+
+app.get("/get-auditorium-pricing", async (req, res) => {
+  const { auditoriumId } = req.query; // Extract auditoriumId from query parameters
+
+  try {
+      // Find pricing details for the specified auditorium
+      const pricingList = await audipmodel.find({ userId: auditoriumId }).populate('userId');
+
+      if (pricingList.length === 0) {
+          return res.status(404).json({ message: "No pricing details found for this auditorium." });
+      }
+
+      res.status(200).json(pricingList);
+  } catch (error) {
+      console.error("Error fetching auditorium pricing data:", error);
+      res.status(500).json({ message: "Error fetching auditorium pricing data", error });
+  }
+});
+
 app.post('/get-pricing', async (req, res) => {
   try {
     const pricingData = await pricingmodel.find();
@@ -591,6 +645,56 @@ app.post('/api/bookings/fetch', async (req, res) => {
   }
 });
 
+
+
+app.post('/api/bookings/fetch/auditorium', async (req, res) => {
+  const { auditoriumId } = req.body;
+
+  if (!auditoriumId) {
+    return res.status(400).json({ message: 'Auditorium ID is required.' });
+  }
+
+  try {
+    // Fetch all bookings related to the auditorium
+    const bookings = await bookingModel.find({ entityId: auditoriumId, entityType: 'auditorium' });
+
+    if (bookings.length === 0) {
+      return res.status(404).json({ message: 'No bookings found for this auditorium.' });
+    }
+
+    // Enrich bookings with user details
+    const enrichedBookings = await Promise.all(
+      bookings.map(async (booking) => {
+        try {
+          const user = await usermodel.findById(booking.userId).select('UName Email');
+          if (!user) {
+            console.log(`User not found for booking ID: ${booking._id}`);
+            return { ...booking.toObject(), userName: 'N/A', userEmail: 'N/A' };
+          }
+          return {
+            ...booking.toObject(),
+            userName: user.UName,
+            userEmail: user.Email,
+          };
+        } catch (err) {
+          console.error(`Error fetching user for booking ID: ${booking._id}`, err);
+          return { ...booking.toObject(), userName: 'N/A', userEmail: 'N/A' };
+        }
+      })
+    );
+
+    res.status(200).json({
+      message: 'Bookings retrieved successfully.',
+      bookings: enrichedBookings,
+    });
+  } catch (error) {
+    console.error('Error fetching bookings:', error);
+    res.status(500).json({ message: 'Unable to retrieve bookings. Please try again later.' });
+  }
+});
+
+
+
 module.exports = app;
 
 
@@ -640,6 +744,32 @@ app.post("/pricing", async (req, res) => {
       });
   } catch (error) {
       res.status(500).json({ status: "error", message: error.message });
+  }
+});
+
+app.post("/auditorium-pricing", async (req, res) => {
+  const { userId } = req.body; // Get userId from request body
+
+  if (!userId) {
+    return res.status(400).json({ status: "error", message: "User ID is required" });
+  }
+
+  try {
+    // Fetch pricing details for the given auditorium user ID
+    const pricingDetails = await audipmodel
+      .find({ userId })
+      .populate("userId", "aName aaddress");
+
+    if (!pricingDetails.length) {
+      return res.status(404).json({ status: "error", message: "No pricing found for this auditorium" });
+    }
+
+    res.status(200).json({
+      status: "success",
+      data: pricingDetails,
+    });
+  } catch (error) {
+    res.status(500).json({ status: "error", message: error.message });
   }
 });
 
@@ -712,27 +842,41 @@ app.post('/api/user/bookings', async (req, res) => {
       return res.status(404).json({ message: 'No bookings found for this user.' });
     }
 
-    // Enrich bookings with photographer details (entityId references a photographer)
+    // Enrich bookings with photographer or auditorium details
     const enrichedBookings = await Promise.all(
       bookings.map(async (booking) => {
         try {
-          const photographer = await photomodel // Change here to photomodel
-            .findById(booking.entityId) // Assuming entityId is the ID of the photographer
-            .select('PName Email'); // Select the required fields
+          // Check if the entityId corresponds to a photographer or auditorium
+          let entityDetails;
+          const photographer = await photomodel.findById(booking.entityId).select('PName Email');
+          const auditorium = await audimodel.findById(booking.entityId).select('aName Email');
 
-          if (!photographer) {
-            console.log(`Photographer not found for booking ID: ${booking._id}`);
-            return { ...booking.toObject(), photographerName: 'N/A', photographerEmail: 'N/A' };
+          if (photographer) {
+            entityDetails = {
+              name: photographer.PName,
+              email: photographer.Email,
+              type: 'photographer',
+            };
+          } else if (auditorium) {
+            entityDetails = {
+              name: auditorium.aName,
+              email: auditorium.Email,
+              type: 'auditorium',
+            };
+          } else {
+            console.log(`Entity not found for booking ID: ${booking._id}`);
+            return { ...booking.toObject(), entityName: 'N/A', entityEmail: 'N/A', entityType: 'N/A' };
           }
 
           return {
             ...booking.toObject(),
-            photographerName: photographer.PName, // Change to PName
-            photographerEmail: photographer.Email,
+            entityName: entityDetails.name,
+            entityEmail: entityDetails.email,
+            entityType: entityDetails.type,
           };
         } catch (err) {
-          console.error(`Error fetching photographer for booking ID: ${booking._id}`, err);
-          return { ...booking.toObject(), photographerName: 'N/A', photographerEmail: 'N/A' };
+          console.error(`Error fetching entity for booking ID: ${booking._id}`, err);
+          return { ...booking.toObject(), entityName: 'N/A', entityEmail: 'N/A', entityType: 'N/A' };
         }
       })
     );
@@ -801,7 +945,7 @@ app.post('/api/book', async (req, res) => {
     console.error('Error creating booking:', error);
     res.status(500).json({ message: 'Internal Server Error' });
   }
-})
+});
 
 
 
