@@ -532,12 +532,20 @@ app.get("/get-auditorium-pricing", async (req, res) => {
   }
 });
 
-app.post('/get-pricing', async (req, res) => {
+app.get('/get-pricing', async (req, res) => {
+  const token = req.headers.token; // Assuming you're using token for authorization
+
+  // Validate token here
+  if (!token) {
+      return res.status(401).json({ message: 'Unauthorized' });
+  }
+
   try {
-    const pricingData = await pricingmodel.find();
-    res.json(pricingData);
+      const pricingPackages = await pricingmodel.find(); // Fetch all pricing packages
+      res.json(pricingPackages); // Send the data back to the client
   } catch (error) {
-    res.status(500).json({ message: 'Failed to fetch pricing data', error });
+      console.error('Error fetching pricing:', error);
+      res.status(500).json({ message: 'Error fetching pricing data' });
   }
 });
 
@@ -696,6 +704,95 @@ app.post('/api/bookings/fetch/auditorium', async (req, res) => {
 
 
 module.exports = app;
+
+app.post('/api/user/billing', async (req, res) => {
+  const { userId } = req.body;
+
+  if (!userId) {
+    return res.status(400).json({ message: 'User ID is required.' });
+  }
+
+  try {
+    // Fetch photographer bookings
+    const photographerBookings = await bookingModel.find({
+      userId: userId,
+      entityType: 'photographer'
+    });
+
+    // Fetch auditorium bookings
+    const auditoriumBookings = await bookingModel.find({
+      userId: userId,
+      entityType: 'auditorium'
+    });
+
+    // Initialize billing summary
+    const billingSummary = {};
+
+    // Process photographer bookings
+    photographerBookings.forEach(booking => {
+      const bookingDate = new Date(booking.createdAt).toISOString().split('T')[0]; // Format: YYYY-MM-DD
+      if (!billingSummary[bookingDate]) {
+        billingSummary[bookingDate] = { auditorium: 0, photographer: 0, totalCost: 0 };
+      }
+      billingSummary[bookingDate].photographer += booking.totalCost; // Assuming totalCost is the total for this booking
+      billingSummary[bookingDate].totalCost += booking.totalCost;
+    });
+
+    // Process auditorium bookings
+    auditoriumBookings.forEach(booking => {
+      const bookingDate = new Date(booking.createdAt).toISOString().split('T')[0]; // Format: YYYY-MM-DD
+      if (!billingSummary[bookingDate]) {
+        billingSummary[bookingDate] = { auditorium: 0, photographer: 0, totalCost: 0 };
+      }
+      billingSummary[bookingDate].auditorium += booking.totalCost; // Assuming totalCost is the total for this booking
+      billingSummary[bookingDate].totalCost += booking.totalCost;
+    });
+
+    res.status(200).json({
+      billingSummary,
+    });
+  } catch (error) {
+    console.error('Error fetching billing summary:', error);
+    res.status(500).json({ message: 'Unable to retrieve billing summary. Please try again later.' });
+  }
+});
+
+
+
+// GET User Details by ID
+app.get('/:userId', async (req, res) => {
+  try {
+    const user = await User.findById(req.params.userId);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    res.status(200).json(user);
+  } catch (error) {
+    console.error('Error fetching user details:', error);
+    res.status(500).json({ message: 'Server error. Try again later.' });
+  }
+});
+
+// PUT Update User Details
+app.put('/:userId', async (req, res) => {
+  try {
+    const { UName, Email, Phone, Gender, uaddress, state, City } = req.body;
+    const user = await User.findByIdAndUpdate(
+      req.params.userId,
+      { UName, Email, Phone, Gender, uaddress, state, City },
+      { new: true }
+    );
+
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    res.status(200).json({ message: 'User details updated successfully', user });
+  } catch (error) {
+    console.error('Error updating user details:', error);
+    res.status(500).json({ message: 'Server error. Try again later.' });
+  }
+});
+
 
 
 
