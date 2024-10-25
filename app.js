@@ -20,6 +20,9 @@ const { catsmodel } = require("./models/catering");
 const { sendEmail } = require("./models/email");
 const { catpmodel } = require("./models/Caterp");
 const { catspostmodel } = require("./models/caterpost");
+const { decmodel } = require("./models/decoration");
+const { decpmodel } = require("./models/decp");
+const { Decpostmodel } = require("./models/decorpost");
 require('dotenv').config();
 let app = express();
 app.use(cors());
@@ -146,6 +149,43 @@ app.post('/audisignup', upload.single('aimage'), async (req, res) => {
     res.json({ status: 'success', message: 'Auditorium registered successfully' });
   } catch (error) {
     console.error('Error saving auditorium:', error);
+    res.status(500).json({ status: 'error', message: 'An error occurred. Please try again.' });
+  }
+});
+
+app.post('/decorationsignup', upload.single('dimage'), async (req, res) => {
+  const input = req.body;
+
+  // Trim whitespace from input fields
+  Object.keys(input).forEach((key) => {
+    if (typeof input[key] === 'string') {
+      input[key] = input[key].trim();
+    }
+  });
+
+  // Handle image path
+  const fileName = req.file ? req.file.filename : null;
+  console.log(fileName);
+  input.dimage = fileName; // Store only the filename
+
+  // Hash the password
+  const hashedPassword = bcrypt.hashSync(input.Password, 10);
+  input.Password = hashedPassword;
+
+  try {
+    // Check if the email already exists
+    const existingDecorator = await decmodel.findOne({ Email: input.Email });
+    if (existingDecorator) {
+      return res.status(400).json({ status: 'error', message: 'Email already exists' });
+    }
+
+    // Save the new decorator
+    const newDecorator = new decmodel(input);
+    await newDecorator.save();
+
+    res.json({ status: 'success', message: 'Decorator registered successfully' });
+  } catch (error) {
+    console.error('Error saving decorator:', error);
     res.status(500).json({ status: 'error', message: 'An error occurred. Please try again.' });
   }
 });
@@ -287,6 +327,44 @@ app.post("/auditorium/signin", async (req, res) => {
   }
 });
 
+app.post('/decorationsignin', async (req, res) => {
+  const { Email, Password } = req.body;
+
+  try {
+    // Check if the decorator exists in the database
+    const decorator = await decmodel.findOne({ Email });
+    if (!decorator) {
+      return res.status(400).json({ status: 'error', message: 'Incorrect email' });
+    }
+
+    // Compare the input password with the hashed password in the database
+    const isPasswordValid = bcrypt.compareSync(Password, decorator.Password);
+    if (!isPasswordValid) {
+      return res.status(400).json({ status: 'error', message: 'Incorrect password' });
+    }
+
+    // Generate JWT token
+    const token = jwt.sign({ Email }, 'WeddingApp', { expiresIn: '1d' }); // Same secret used
+
+    // Respond with the token and decorator details
+    res.json({
+      status: 'success',
+      token,
+      decoratorId: decorator._id,
+      dName: decorator.dName,
+      Email: decorator.Email,
+      Phone: decorator.Phone,
+      daddress: decorator.daddress,
+      state: decorator.state,
+      City: decorator.City,
+      experience: decorator.experience,
+      Description: decorator.Description,
+      dimage: decorator.dimage
+    });
+  } catch (error) {
+    res.status(500).json({ status: 'error', message: error.message });
+  }
+});
 
 // User Signin Route
 // User Signin Route
@@ -311,6 +389,11 @@ app.post('/usersignin', async (req, res) => {
       token,
       userId: user._id,
       UName: user.UName,
+      Email: user.Email,
+      Phone: user.Phone,
+      uaddress: user.uaddress,
+      state: user.state,
+      City: user.City,
     });
   } catch (error) {
     res.status(500).json({ status: 'error', message: error.message });
@@ -513,6 +596,63 @@ app.post("/create-auditorium-post", upload.array("postImage", 3), async (req, re
     }
   });
 });
+app.post("/create-decoration-post", upload.array("postImage", 3), async (req, res) => {
+  console.log("Request received to create a new decoration post");
+
+  const token = req.body.token;
+  console.log("Token:", token);
+
+  // Verify the token
+  jwt.verify(token, "WeddingApp", async (error, decoded) => {
+    if (error || !decoded) {
+      console.log("Error verifying token:", error);
+      return res.status(401).json({ status: "invalid auth" });
+    }
+
+    console.log("Token verified successfully");
+
+    // Get userId from the decoded token or request body
+    const userId = req.body.userId;
+    console.log("User ID:", userId);
+
+    if (!userId) {
+      console.log("User ID is required");
+      return res.status(400).json({ message: "User ID is required" });
+    }
+
+    // Ensure files are uploaded
+    if (!req.files || req.files.length === 0) {
+      console.log("No files uploaded");
+      return res.status(400).json({ message: "At least one image is required" });
+    }
+
+    console.log("Files uploaded successfully");
+
+    // Collect file paths from the uploaded files
+    const postImages = req.files.map(file => file.filename);
+    console.log("File paths:", postImages);
+
+    try {
+      // Create a new decoration post with userId and postImage
+      const newDecorationPost = new Decpostmodel({
+        userId: new mongoose.Types.ObjectId(userId), // Correct ObjectId instantiation
+        postImage: postImages, // Save the filenames (no need to modify)
+      });
+
+      console.log("New decoration post created:", newDecorationPost);
+
+      // Save the post to the database
+      await newDecorationPost.save();
+      console.log("Decoration post saved successfully");
+
+      // Respond with success and the newly created post
+      res.status(201).json({ message: "Decoration post created successfully", post: newDecorationPost });
+    } catch (error) {
+      console.error("Error creating decoration post:", error);
+      res.status(500).json({ message: "Error creating decoration post", error });
+    }
+  });
+});
 
 app.post("/create-catering-post", upload.array("postImage", 4), async (req, res) => {
   console.log("Request received to create a new catering post");
@@ -687,6 +827,37 @@ app.post("/create-catering-pricing", async (req, res) => {
       res.status(500).json({ message: "Error creating catering pricing", error });
   }
 });
+app.post("/create-decoration-pricing", async (req, res) => {
+  console.log("Reached /create-decoration-pricing route");
+  console.log("Request Body:", req.body);
+
+  const { userId, decorationType, Duration, Description, DecPrice } = req.body;
+
+  // Check for required fields in the request body
+  if (!userId || !decorationType || !Duration || !Description || !DecPrice) {
+    console.log("Missing required fields");
+    return res.status(400).json({ message: "All fields are required" });
+  }
+
+  try {
+    // Create a new decoration pricing entry
+    const newDecPricing = new decpmodel({
+      userId: new mongoose.Types.ObjectId(userId),
+      decorationType,
+      Duration,
+      Description,
+      DecPrice // Make sure DecPrice is added here
+    });
+
+    console.log("New decoration pricing created:", newDecPricing);
+    await newDecPricing.save();
+
+    res.status(201).json({ message: "Decoration pricing created successfully", pricing: newDecPricing });
+  } catch (error) {
+    console.error("Error creating decoration pricing:", error);
+    res.status(500).json({ message: "Error creating decoration pricing", error });
+  }
+});
 
 // GET API: Fetch confirmed bookings with user name and entity details
 app.get("/confirmed-bookings", async (req, res) => {
@@ -856,6 +1027,32 @@ app.post("/view-my-catering-posts", async (req, res) => {
     res.status(500).json({ message: "Error fetching catering posts", error });
   }
 });
+app.post("/view-my-decoration-posts", async (req, res) => {
+  const { userId } = req.body; // Extract userId
+
+  console.log("Received userId:", userId); // Log received userId
+
+  // Check if userId is provided
+  if (!userId) {
+    return res.status(401).json({ message: "userId is required" });
+  }
+
+  try {
+    // Fetch posts related to the specific userId
+    const decorationPosts = await Decpostmodel.find({ userId: new mongoose.Types.ObjectId(userId) }).exec();
+    console.log("Fetched decoration posts:", decorationPosts); // Log fetched posts
+
+    // Check if any posts were found
+    if (decorationPosts.length === 0) {
+      return res.status(404).json({ message: "No posts found for this user" });
+    }
+
+    res.status(200).json({ message: "Decoration posts fetched successfully", posts: decorationPosts });
+  } catch (error) {
+    console.error("Error fetching decoration posts:", error);
+    res.status(500).json({ message: "Error fetching decoration posts", error });
+  }
+});
 
 app.post('/api/bookings/fetch', async (req, res) => {
   const { photographerId } = req.body;
@@ -951,6 +1148,51 @@ app.post('/api/bookings/fetch/auditorium', async (req, res) => {
   }
 });
 
+app.post('/api/bookings/fetch/caterer', async (req, res) => {
+  const { catererId } = req.body;
+
+  if (!catererId) {
+    return res.status(400).json({ message: 'Caterer ID is required.' });
+  }
+
+  try {
+    // Fetch all bookings related to the caterer
+    const bookings = await bookingModel.find({ entityId: catererId, entityType: 'catering' });
+
+    if (bookings.length === 0) {
+      return res.status(404).json({ message: 'No bookings found for this caterer.' });
+    }
+
+    // Enrich bookings with user details
+    const enrichedBookings = await Promise.all(
+      bookings.map(async (booking) => {
+        try {
+          const user = await usermodel.findById(booking.userId).select('UName Email');
+          if (!user) {
+            console.log(`User not found for booking ID: ${booking._id}`);
+            return { ...booking.toObject(), userName: 'N/A', userEmail: 'N/A' };
+          }
+          return {
+            ...booking.toObject(),
+            userName: user.UName,
+            userEmail: user.Email,
+          };
+        } catch (err) {
+          console.error(`Error fetching user for booking ID: ${booking._id}`, err);
+          return { ...booking.toObject(), userName: 'N/A', userEmail: 'N/A' };
+        }
+      })
+    );
+
+    res.status(200).json({
+      message: 'Bookings retrieved successfully.',
+      bookings: enrichedBookings,
+    });
+  } catch (error) {
+    console.error('Error fetching bookings:', error);
+    res.status(500).json({ message: 'Unable to retrieve bookings. Please try again later.' });
+  }
+});
 
 
 module.exports = app;
@@ -975,28 +1217,37 @@ app.post('/api/user/billing', async (req, res) => {
       entityType: 'auditorium'
     });
 
+    // Fetch catering bookings
+    const cateringBookings = await bookingModel.find({
+      userId: userId,
+      entityType: 'catering'
+    });
+
     // Initialize billing summary
     const billingSummary = {};
 
-    // Process photographer bookings
-    photographerBookings.forEach(booking => {
-      const bookingDate = new Date(booking.createdAt).toISOString().split('T')[0]; // Format: YYYY-MM-DD
-      if (!billingSummary[bookingDate]) {
-        billingSummary[bookingDate] = { auditorium: 0, photographer: 0, totalCost: 0 };
-      }
-      billingSummary[bookingDate].photographer += booking.totalCost; // Assuming totalCost is the total for this booking
-      billingSummary[bookingDate].totalCost += booking.totalCost;
-    });
+    // Helper function to process bookings
+    const processBookings = (bookings, entityType) => {
+      bookings.forEach(booking => {
+        booking.bookingDates.forEach(date => {
+          const bookingDate = new Date(date).toISOString().split('T')[0]; // Format: YYYY-MM-DD
+          
+          // Initialize if not already present
+          if (!billingSummary[bookingDate]) {
+            billingSummary[bookingDate] = { auditorium: 0, photographer: 0, catering: 0, totalCost: 0 };
+          }
 
-    // Process auditorium bookings
-    auditoriumBookings.forEach(booking => {
-      const bookingDate = new Date(booking.createdAt).toISOString().split('T')[0]; // Format: YYYY-MM-DD
-      if (!billingSummary[bookingDate]) {
-        billingSummary[bookingDate] = { auditorium: 0, photographer: 0, totalCost: 0 };
-      }
-      billingSummary[bookingDate].auditorium += booking.totalCost; // Assuming totalCost is the total for this booking
-      billingSummary[bookingDate].totalCost += booking.totalCost;
-    });
+          // Add costs based on entityType
+          billingSummary[bookingDate][entityType] += booking.totalCost;
+          billingSummary[bookingDate].totalCost += booking.totalCost;
+        });
+      });
+    };
+
+    // Process all bookings by entity type
+    processBookings(photographerBookings, 'photographer');
+    processBookings(auditoriumBookings, 'auditorium');
+    processBookings(cateringBookings, 'catering');
 
     res.status(200).json({
       billingSummary,
@@ -1006,6 +1257,8 @@ app.post('/api/user/billing', async (req, res) => {
     res.status(500).json({ message: 'Unable to retrieve billing summary. Please try again later.' });
   }
 });
+
+
 
 
 //i will use it later code for pricingpage view and update
@@ -1204,6 +1457,33 @@ app.put('/api/bookings/status/:id', async (req, res) => {
     res.status(500).json({ message: 'Internal Server Error' });
   }
 });
+app.put('/api/bookings/caterer/status/:id', async (req, res) => {
+  const bookingId = req.params.id;
+  const { status } = req.body; // Receive the new status in the request body
+
+  try {
+    // Validate the status value (only "pending" or "confirmed" allowed)
+    if (!["pending", "confirmed"].includes(status)) {
+      return res.status(400).json({ message: 'Invalid status.' });
+    }
+
+    // Find the booking by ID, ensuring it's related to a caterer
+    const updatedBooking = await bookingModel.findOneAndUpdate(
+      { _id: bookingId, entityType: 'catering' }, // Ensure the booking is for catering
+      { status },
+      { new: true } // Return the updated booking
+    );
+
+    if (!updatedBooking) {
+      return res.status(404).json({ message: 'Catering booking not found.' });
+    }
+
+    res.status(200).json({ message: 'Catering booking status updated.', booking: updatedBooking });
+  } catch (error) {
+    console.error('Error updating catering booking status:', error);
+    res.status(500).json({ message: 'Internal Server Error' });
+  }
+});
 
 app.post('/api/user/bookings', async (req, res) => {
   console.log('Received request for user bookings:', req.body);
@@ -1297,8 +1577,11 @@ app.post('/api/book', async (req, res) => {
       return res.status(400).json({ message: 'All fields are required.' });
     }
 
-    // Convert bookingDates to an array of ISO strings for accurate comparison
-    const bookingDatesArray = bookingDates.map(date => new Date(date).toISOString());
+    // Convert bookingDates to an array of Date objects, stripping off the time component
+    const bookingDatesArray = bookingDates.map(date => {
+      const localDate = new Date(date); // Convert string to Date object
+      return new Date(localDate.getFullYear(), localDate.getMonth(), localDate.getDate()); // Set hours, minutes, seconds to zero
+    });
 
     // Check if any booking exists with the same entity and date
     const existingBooking = await bookingModel.findOne({
@@ -1307,40 +1590,46 @@ app.post('/api/book', async (req, res) => {
     });
 
     if (existingBooking) {
-      return res.status(409).json({ message: 'This slot is already booked for the selected date.' });
+      return res.status(409).json({ message: 'This entity is already booked on the selected date.' });
     }
 
-    // Fetch user details
-    const user = await usermodel.findById(userId).select('name email'); // Only select name and email
-
-    if (!user) {
-      return res.status(404).json({ message: 'User not found.' });
-    }
-
-    // Create a new booking if no conflict found
+    // Proceed to create a new booking
     const newBooking = new bookingModel({
       userId,
       entityId,
       entityType,
       bookingItems,
       totalCost,
-      bookingDates: bookingDatesArray, // Store booking dates as ISO strings
+      bookingDates: bookingDatesArray,
     });
 
     await newBooking.save();
-
-    res.status(201).json({
-      message: 'Booking successful!',
-      booking: {
-        ...newBooking.toObject(), // Convert booking to plain object
-        userName: user.name, // Include user name
-        userEmail: user.email, // Include user email
-      },
-    });
-
+    return res.status(201).json({ message: 'Booking successful!' });
   } catch (error) {
-    console.error('Error creating booking:', error);
-    res.status(500).json({ message: 'Internal Server Error' });
+    console.error('Error during booking:', error);
+    return res.status(500).json({ message: 'Internal Server Error' });
+  }
+});
+
+app.put('/api/user/update/:id', async (req, res) => {
+  const { id } = req.params; // Get the userId from the request URL
+  const { UName, Phone, uaddress, state, City } = req.body; // Get updated data from request body
+
+  try {
+    // Update the user details in MongoDB
+    const updatedUser = await usermodel.findByIdAndUpdate(
+      id,
+      { UName, Phone, uaddress, state, City },
+      { new: true }
+    );
+
+    if (!updatedUser) {
+      return res.status(404).json({ status: 'error', message: 'User not found' });
+    }
+
+    res.json({ status: 'success', message: 'User details updated successfully', updatedUser });
+  } catch (error) {
+    res.status(500).json({ status: 'error', message: 'An error occurred while updating user details' });
   }
 });
 
