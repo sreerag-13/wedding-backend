@@ -13,7 +13,7 @@ const bookSchema = new Mongoose.Schema({
   entityType: {
     type: String, // Type of service
     required: true,
-    enum: ["photographer", "auditorium", "catering"],
+    enum: ["photographer", "auditorium", "catering","decoration"],
   },
   bookingItems: [
     {

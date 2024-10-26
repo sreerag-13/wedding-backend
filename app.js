@@ -258,39 +258,58 @@ app.post("/viewallC", async (req, res) => {
   }
 });
 
+app.post("/viewallD", async (req, res) => {
+  try {
+    // Fetch all decorators, excluding passwords for security
+    const decorators = await decmodel.find().select('-Password');
+    console.log(decorators);
+    res.status(200).json(decorators);
+  } catch (error) {
+    console.error("Error fetching decorators:", error);
+    res.status(500).json({ message: "Error fetching decorators", error });
+  }
+});
 
 // Existing photographer signin API with JWT
-app.post("/photosignin", (req, res) => {
-  let input = req.body;
+app.post("/photosignin", async (req, res) => {
+  const { Email, Password } = req.body;
 
-  photomodel.findOne({ "Email": req.body.Email })
-    .then((response) => {
-      if (response) {
-        const dpassword = bcrypt.compareSync(input.Password, response.Password);
-        if (dpassword) {
-          jwt.sign({ Email: input.Email }, "WeddingApp", { expiresIn: "1d" }, (error, token) => {
-            if (error) {
-              res.json({ "status": "error", "errorMessage": error });
-            } else {
-              res.json({
-                "status": "success",
-                "token": token,
-                "userId": response._id,
-                "Pimage": response.Pimage,
-                "PName": response.PName
-              });
-            }
-          });
-        } else {
-          res.json({ "status": "incorrect password" });
-        }
-      } else {
-        res.json({ "status": "incorrect email" });
-      }
-    })
-    .catch((error) => {
-      res.json({ "status": "error", "message": error.message });
+  try {
+    // Find the photographer by email
+    const photographer = await photomodel.findOne({ Email });
+    
+    // Check if photographer exists
+    if (!photographer) {
+      return res.status(400).json({ status: 'error', message: 'Incorrect email' });
+    }
+
+    // Validate password
+    const isPasswordValid = bcrypt.compareSync(Password, photographer.Password);
+    if (!isPasswordValid) {
+      return res.status(400).json({ status: 'error', message: 'Incorrect password' });
+    }
+
+    // Generate JWT token
+    const token = jwt.sign({ Email }, "WeddingApp", { expiresIn: "1d" });
+
+    // Send the response with all attributes
+    res.json({
+      status: 'success',
+      token,
+      userId: photographer._id,
+      PName: photographer.PName,
+      Email: photographer.Email,
+      Phone: photographer.Phone,
+      Paddress: photographer.Paddress,
+      state: photographer.state,
+      City: photographer.City,
+      experience: photographer.experience,
+      Description: photographer.Description,
+      Pimage: photographer.Pimage,
     });
+  } catch (error) {
+    res.status(500).json({ status: 'error', message: error.message });
+  }
 });
 
 app.post("/auditorium/signin", async (req, res) => {
@@ -874,15 +893,20 @@ app.get("/confirmed-bookings", async (req, res) => {
       bookings.map(async (booking) => {
         let entity;
 
+        // Determine which model to query based on entityType
         if (booking.entityType === "auditorium") {
           entity = await audimodel.findById(booking.entityId).select("aName");
         } else if (booking.entityType === "photographer") {
           entity = await photomodel.findById(booking.entityId).select("PName");
+        } else if (booking.entityType === "catering") {
+          entity = await catsmodel.findById(booking.entityId).select("CName");
+        } else if (booking.entityType === "decoration") {
+          entity = await decmodel.findById(booking.entityId).select("dName");
         }
 
         return {
           ...booking,
-          entityName: entity ? entity.aName || entity.PName : "Unknown", // Attach entity name
+          entityName: entity ? entity.aName || entity.PName || entity.CName || entity.dName : "Unknown", // Attach entity name
           userId: booking.userId ? booking.userId : null, // Attach entire user object
         };
       })
@@ -894,6 +918,7 @@ app.get("/confirmed-bookings", async (req, res) => {
     res.status(500).json({ message: "Internal Server Error" });
   }
 });
+
 
 app.post('/send-email', async (req, res) => {
   const { email, subject, body } = req.body;
@@ -926,23 +951,208 @@ app.get("/get-auditorium-pricing", async (req, res) => {
   }
 });
 
-app.get('/get-pricing', async (req, res) => {
-  const token = req.headers.token; // Assuming you're using token for authorization
+ //photogapher
+  app.get('/get-pricing', async (req, res) => {
+    const { userId } = req.query; // Extract userId from query parameters
+  
+    // Validate userId
+    if (!userId) {
+      return res.status(400).json({ message: 'User ID is required' });
+    }
+  
+    try {
+      // Fetch pricing packages specific to the user
+      const pricingPackages = await pricingmodel.find({ userId: userId }); // Filter by userId
+  
+      if (!pricingPackages.length) {
+        return res.status(404).json({ message: 'No pricing packages found for this user' });
+      }
+  
+      res.json(pricingPackages); // Send the data back to the client
+    } catch (error) {
+      console.error('Error fetching pricing:', error);
+      res.status(500).json({ message: 'Error fetching pricing data' });
+    }
+  });
+  
+ //photogapher
+  app.delete('/delete-pricing/:id', async (req, res) => {
+    const { id } = req.params;
+  
+    try {
+      const deletedPricing = await pricingmodel.findOneAndDelete({ _id: id }); // No need to check userId here
+  
+      if (!deletedPricing) {
+        return res.status(404).json({ message: 'Pricing package not found.' });
+      }
+  
+      res.status(200).json({ message: 'Pricing package deleted successfully!' });
+    } catch (error) {
+      console.error('Error deleting pricing:', error);
+      res.status(500).json({ message: 'Error deleting pricing package.' });
+    }
+  });
+  //photopher
+  app.put('/update-pricing/:id', async (req, res) => {
+    const { id } = req.params;
+    const { packageName, price, duration, userId } = req.body;
+  
+    try {
+      const updatedPricing = await pricingmodel.findOneAndUpdate(
+        { _id: id, userId }, // Ensure that the userId matches
+        { packageName, price, duration},
+        { new: true } // Return the updated document
+      );
+  
+      if (!updatedPricing) {
+        return res.status(404).json({ message: 'Pricing package not found or you do not have permission to edit it.' });
+      }
+  
+      res.status(200).json(updatedPricing);
+    } catch (error) {
+      console.error('Error updating pricing:', error);
+      res.status(500).json({ message: 'Error updating pricing package.' });
+    }
+  });
 
-  // Validate token here
-  if (!token) {
-      return res.status(401).json({ message: 'Unauthorized' });
+  app.get('/get-auditorium-pricing', async (req, res) => {
+    const { userId } = req.query; // Extract userId from query parameters
+  
+    // Validate userId
+    if (!userId) {
+      return res.status(400).json({ message: 'User ID is required' });
+    }
+  
+    try {
+      // Fetch pricing packages specific to the user
+      const pricingPackages = await audipmodel.find({ userId: userId }); // Filter by userId
+  
+      if (!pricingPackages.length) {
+        return res.status(404).json({ message: 'No pricing packages found for this user' });
+      }
+  
+      res.json(pricingPackages); // Send the data back to the client
+    } catch (error) {
+      console.error('Error fetching auditorium pricing:', error);
+      res.status(500).json({ message: 'Error fetching auditorium pricing data' });
+    }
+  });
+  // Update Pricing Package for Auditorium
+app.put('/update-auditorium-pricing/:id', async (req, res) => {
+  const { id } = req.params;
+  const { userId, Capacity, price, type, duration } = req.body;
+
+  try {
+    const updatedPricing = await audipmodel.findOneAndUpdate(
+      { _id: id, userId }, // Ensure that the userId matches
+      { Capacity, price, type, duration },
+      { new: true } // Return the updated document
+    );
+
+    if (!updatedPricing) {
+      return res.status(404).json({ message: 'Pricing package not found or you do not have permission to edit it.' });
+    }
+
+    res.status(200).json(updatedPricing);
+  } catch (error) {
+    console.error('Error updating auditorium pricing:', error);
+    res.status(500).json({ message: 'Error updating auditorium pricing package.' });
+  }
+});
+// Delete Pricing Package for Auditorium
+app.delete('/delete-auditorium-pricing/:id', async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const deletedPricing = await audipmodel.findOneAndDelete({ _id: id }); // No need to check userId here
+
+    if (!deletedPricing) {
+      return res.status(404).json({ message: 'Pricing package not found.' });
+    }
+
+    res.status(200).json({ message: 'Pricing package deleted successfully!' });
+  } catch (error) {
+    console.error('Error deleting auditorium pricing:', error);
+    res.status(500).json({ message: 'Error deleting auditorium pricing package.' });
+  }
+});
+app.get('/get-catering-pricing', async (req, res) => {
+  const { userId } = req.query; // Extract userId from query parameters
+
+  // Validate userId
+  if (!userId) {
+      return res.status(400).json({ message: 'User ID is required' });
   }
 
   try {
-      const pricingPackages = await pricingmodel.find(); // Fetch all pricing packages
+      // Fetch pricing packages specific to the user
+      const pricingPackages = await catpmodel.find({ userId });
+
+      if (!pricingPackages.length) {
+          return res.status(404).json({ message: 'No pricing packages found for this user' });
+      }
+
       res.json(pricingPackages); // Send the data back to the client
   } catch (error) {
-      console.error('Error fetching pricing:', error);
-      res.status(500).json({ message: 'Error fetching pricing data' });
+      console.error('Error fetching catering pricing:', error);
+      res.status(500).json({ message: 'Error fetching catering pricing data' });
   }
 });
 
+// Create a new catering pricing package
+app.post('/create-catering-pricing', async (req, res) => {
+  const { userId, foodType, foodItems, foodPrice, Quantity, Package } = req.body;
+
+  try {
+      const newPricing = new catpmodel({ userId, foodType, foodItems, foodPrice, Quantity, Package });
+      const savedPricing = await newPricing.save();
+      res.status(201).json(savedPricing);
+  } catch (error) {
+      console.error('Error creating catering pricing:', error);
+      res.status(500).json({ message: 'Error creating catering pricing package.' });
+  }
+});
+
+// Update a catering pricing package
+app.put('/update-catering-pricing/:id', async (req, res) => {
+  const { id } = req.params;
+  const { userId, foodType, foodItems, foodPrice, Quantity, Package } = req.body;
+
+  try {
+      const updatedPricing = await catpmodel.findOneAndUpdate(
+          { _id: id, userId }, // Ensure that the userId matches
+          { foodType, foodItems, foodPrice, Quantity, Package },
+          { new: true } // Return the updated document
+      );
+
+      if (!updatedPricing) {
+          return res.status(404).json({ message: 'Pricing package not found or you do not have permission to edit it.' });
+      }
+
+      res.status(200).json(updatedPricing);
+  } catch (error) {
+      console.error('Error updating catering pricing:', error);
+      res.status(500).json({ message: 'Error updating catering pricing package.' });
+  }
+});
+
+// Delete a catering pricing package
+app.delete('/delete-catering-pricing/:id', async (req, res) => {
+  const { id } = req.params;
+
+  try {
+      const deletedPricing = await catpmodel.findOneAndDelete({ _id: id }); // No need to check userId here
+
+      if (!deletedPricing) {
+          return res.status(404).json({ message: 'Pricing package not found.' });
+      }
+
+      res.status(200).json({ message: 'Pricing package deleted successfully!' });
+  } catch (error) {
+      console.error('Error deleting catering pricing:', error);
+      res.status(500).json({ message: 'Error deleting catering pricing package.' });
+  }
+});
 
 app.post("/view-my-posts", async (req, res) => {
   const { token, userId } = req.body;
@@ -972,7 +1182,69 @@ app.post("/view-my-posts", async (req, res) => {
     }
   });
 }); 
+app.delete('/delete-decoration-pricing/:id', async (req, res) => {
+  const { id } = req.params;
 
+  try {
+      const deletedPricing = await decpmodel.findOneAndDelete({ _id: id });
+
+      if (!deletedPricing) {
+          return res.status(404).json({ message: 'Pricing package not found.' });
+      }
+
+      res.status(200).json({ message: 'Decoration pricing package deleted successfully!' });
+  } catch (error) {
+      console.error('Error deleting decoration pricing:', error);
+      res.status(500).json({ message: 'Error deleting decoration pricing package.' });
+  }
+});
+
+// Route to update decoration pricing
+app.put('/update-decoration-pricing/:id', async (req, res) => {
+  const { id } = req.params;
+  const { userId, decorationType, Duration, Description, DecPrice } = req.body;
+
+  try {
+      const updatedPricing = await decpmodel.findOneAndUpdate(
+          { _id: id, userId }, // Ensure that the userId matches
+          { decorationType, Duration, Description, DecPrice },
+          { new: true } // Return the updated document
+      );
+
+      if (!updatedPricing) {
+          return res.status(404).json({ message: 'Pricing package not found or you do not have permission to edit it.' });
+      }
+
+      res.status(200).json(updatedPricing);
+  } catch (error) {
+      console.error('Error updating decoration pricing:', error);
+      res.status(500).json({ message: 'Error updating decoration pricing package.' });
+  }
+});
+
+// Route to fetch decoration pricing packages by userId
+app.get('/get-decoration-pricing', async (req, res) => {
+  const { userId } = req.query; // Extract userId from query parameters
+
+  // Validate userId
+  if (!userId) {
+      return res.status(400).json({ message: 'User ID is required' });
+  }
+
+  try {
+      // Fetch pricing packages specific to the user
+      const pricingPackages = await decpmodel.find({ userId }); // Filter by userId
+
+      if (!pricingPackages.length) {
+          return res.status(404).json({ message: 'No pricing packages found for this user' });
+      }
+
+      res.json(pricingPackages); // Send the data back to the client
+  } catch (error) {
+      console.error('Error fetching decoration pricing:', error);
+      res.status(500).json({ message: 'Error fetching decoration pricing data' });
+  }
+});
 app.post("/view-my-auditorium-posts", async (req, res) => {
   const { userId } = req.body; // Extract userId
 
@@ -998,6 +1270,32 @@ app.post("/view-my-auditorium-posts", async (req, res) => {
   } catch (error) {
     console.error("Error fetching auditorium posts:", error);
     res.status(500).json({ message: "Error fetching auditorium posts", error });
+  }
+});
+app.post("/view-my-decoration-posts", async (req, res) => {
+  const { userId } = req.body; // Extract userId
+
+  console.log("Received userId:", userId); // Log received userId
+
+  // Check if userId is provided
+  if (!userId) {
+    return res.status(401).json({ message: "userId is required" });
+  }
+
+  try {
+    // Fetch posts related to the specific userId
+    const decorationPosts = await Decpostmodel.find({ userId: new mongoose.Types.ObjectId(userId) }).exec();
+    console.log("Fetched decoration posts:", decorationPosts); // Log fetched posts
+
+    // Check if any posts were found
+    if (decorationPosts.length === 0) {
+      return res.status(404).json({ message: "No posts found for this user" });
+    }
+
+    res.status(200).json({ message: "Decoration posts fetched successfully", posts: decorationPosts });
+  } catch (error) {
+    console.error("Error fetching decoration posts:", error);
+    res.status(500).json({ message: "Error fetching decoration posts", error });
   }
 });
 
@@ -1148,6 +1446,52 @@ app.post('/api/bookings/fetch/auditorium', async (req, res) => {
   }
 });
 
+app.post('/api/bookings/fetch/decoration', async (req, res) => {
+  const { decorationId } = req.body;
+
+  if (!decorationId) {
+    return res.status(400).json({ message: 'Decoration ID is required.' });
+  }
+
+  try {
+    // Fetch all bookings related to the decoration entity
+    const bookings = await bookingModel.find({ entityId: decorationId, entityType: 'decoration' });
+
+    if (bookings.length === 0) {
+      return res.status(404).json({ message: 'No bookings found for this decoration.' });
+    }
+
+    // Enrich bookings with user details
+    const enrichedBookings = await Promise.all(
+      bookings.map(async (booking) => {
+        try {
+          const user = await usermodel.findById(booking.userId).select('UName Email');
+          if (!user) {
+            console.log(`User not found for booking ID: ${booking._id}`);
+            return { ...booking.toObject(), userName: 'N/A', userEmail: 'N/A' };
+          }
+          return {
+            ...booking.toObject(),
+            userName: user.UName,
+            userEmail: user.Email,
+          };
+        } catch (err) {
+          console.error(`Error fetching user for booking ID: ${booking._id}`, err);
+          return { ...booking.toObject(), userName: 'N/A', userEmail: 'N/A' };
+        }
+      })
+    );
+
+    res.status(200).json({
+      message: 'Bookings retrieved successfully.',
+      bookings: enrichedBookings,
+    });
+  } catch (error) {
+    console.error('Error fetching bookings:', error);
+    res.status(500).json({ message: 'Unable to retrieve bookings. Please try again later.' });
+  }
+});
+
 app.post('/api/bookings/fetch/caterer', async (req, res) => {
   const { catererId } = req.body;
 
@@ -1223,6 +1567,12 @@ app.post('/api/user/billing', async (req, res) => {
       entityType: 'catering'
     });
 
+    // Fetch decoration bookings
+    const decorationBookings = await bookingModel.find({
+      userId: userId,
+      entityType: 'decoration'
+    });
+
     // Initialize billing summary
     const billingSummary = {};
 
@@ -1234,7 +1584,7 @@ app.post('/api/user/billing', async (req, res) => {
           
           // Initialize if not already present
           if (!billingSummary[bookingDate]) {
-            billingSummary[bookingDate] = { auditorium: 0, photographer: 0, catering: 0, totalCost: 0 };
+            billingSummary[bookingDate] = { auditorium: 0, photographer: 0, catering: 0, decoration: 0, totalCost: 0 };
           }
 
           // Add costs based on entityType
@@ -1248,6 +1598,7 @@ app.post('/api/user/billing', async (req, res) => {
     processBookings(photographerBookings, 'photographer');
     processBookings(auditoriumBookings, 'auditorium');
     processBookings(cateringBookings, 'catering');
+    processBookings(decorationBookings, 'decoration');
 
     res.status(200).json({
       billingSummary,
@@ -1372,7 +1723,32 @@ app.post("/auditorium-pricing", async (req, res) => {
     res.status(500).json({ status: "error", message: error.message });
   }
 });
+app.post("/decoration-pricing", async (req, res) => {
+  const { userId } = req.body; // Extract userId from request body
 
+  if (!userId) {
+    return res.status(400).json({ status: "error", message: "User ID is required" });
+  }
+
+  try {
+    // Fetch pricing details for the given decoration user ID
+    const pricingDetails = await decpmodel
+      .find({ userId })
+      .populate("userId", "dName daddress");
+
+    if (!pricingDetails.length) {
+      return res.status(404).json({ status: "error", message: "No pricing found for this decorator" });
+    }
+
+    res.status(200).json({
+      status: "success",
+      data: pricingDetails,
+    });
+  } catch (error) {
+    console.error("Error fetching decoration pricing:", error.message);
+    res.status(500).json({ status: "error", message: error.message });
+  }
+})
 app.post("/catering-pricing", async (req, res) => {
   const { userId } = req.body; // Get userId from request body
 
@@ -1501,11 +1877,12 @@ app.post('/api/user/bookings', async (req, res) => {
       return res.status(404).json({ message: 'No bookings found for this user.' });
     }
 
-    // Enrich bookings with photographer, auditorium, or catering details
+    // Enrich bookings with photographer, auditorium, catering, or decoration details
     const enrichedBookings = await Promise.all(
       bookings.map(async (booking) => {
         try {
           let entityDetails;
+
           // Check if the entityId corresponds to a photographer
           const photographer = await photomodel.findById(booking.entityId).select('PName Email');
           if (photographer) {
@@ -1514,7 +1891,7 @@ app.post('/api/user/bookings', async (req, res) => {
               email: photographer.Email,
               type: 'photographer',
             };
-          } 
+          }
           // Check if the entityId corresponds to an auditorium
           else {
             const auditorium = await audimodel.findById(booking.entityId).select('aName Email');
@@ -1534,6 +1911,17 @@ app.post('/api/user/bookings', async (req, res) => {
                   email: caterer.Email,
                   type: 'caterer',
                 };
+              }
+              // Check if the entityId corresponds to a decoration
+              else {
+                const decoration = await decmodel.findById(booking.entityId).select('dName Email');
+                if (decoration) {
+                  entityDetails = {
+                    name: decoration.dName,
+                    email: decoration.Email,
+                    type: 'decoration',
+                  };
+                }
               }
             }
           }
@@ -1564,6 +1952,33 @@ app.post('/api/user/bookings', async (req, res) => {
   } catch (error) {
     console.error('Error fetching bookings:', error);
     res.status(500).json({ message: 'Unable to retrieve bookings. Please try again later.' });
+  }
+});
+app.put('/api/bookings/decoration/status/:id', async (req, res) => {
+  const bookingId = req.params.id;
+  const { status } = req.body; // Receive the new status in the request body
+
+  try {
+    // Validate the status value (only "pending" or "confirmed" allowed)
+    if (!["pending", "confirmed"].includes(status)) {
+      return res.status(400).json({ message: 'Invalid status.' });
+    }
+
+    // Find the booking by ID, ensuring it's related to a decoration
+    const updatedBooking = await bookingModel.findOneAndUpdate(
+      { _id: bookingId, entityType: 'decoration' }, // Ensure the booking is for decoration
+      { status },
+      { new: true } // Return the updated booking
+    );
+
+    if (!updatedBooking) {
+      return res.status(404).json({ message: 'Decoration booking not found.' });
+    }
+
+    res.status(200).json({ message: 'Decoration booking status updated.', booking: updatedBooking });
+  } catch (error) {
+    console.error('Error updating decoration booking status:', error);
+    res.status(500).json({ message: 'Internal Server Error' });
   }
 });
 
@@ -1632,6 +2047,28 @@ app.put('/api/user/update/:id', async (req, res) => {
     res.status(500).json({ status: 'error', message: 'An error occurred while updating user details' });
   }
 });
+app.put('/api/photographer/update/:id', async (req, res) => {
+  const { id } = req.params;
+  const { PName, Email, Phone, Paddress, state, City, experience, Description, Pimage } = req.body;
+
+  try {
+    const updatedPhotographer = await photomodel.findByIdAndUpdate(
+      id,
+      { PName, Email, Phone, Paddress, state, City, experience, Description, Pimage },
+      { new: true }
+    );
+
+    if (!updatedPhotographer) {
+      return res.status(404).json({ status: 'error', message: 'Photographer not found' });
+    }
+
+    res.json({ status: 'success', message: 'Photographer details updated successfully', updatedPhotographer });
+  } catch (error) {
+    console.error('Error updating photographer details:', error);
+    res.status(500).json({ status: 'error', message: 'An error occurred while updating photographer details' });
+  }
+});
+
 
 
 
