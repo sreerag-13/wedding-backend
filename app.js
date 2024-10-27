@@ -313,36 +313,44 @@ app.post("/photosignin", async (req, res) => {
 });
 
 app.post("/auditorium/signin", async (req, res) => {
-  const input = req.body;
+  const { Email, Password } = req.body;
 
   try {
-    const response = await audimodel.findOne({ Email: input.Email });
+    // Find the auditorium by email
+    const auditorium = await audimodel.findOne({ Email });
 
-    if (response) {
-      const passwordMatch = bcrypt.compareSync(input.Password, response.Password);
-      if (passwordMatch) {
-        // Generate JWT token
-        jwt.sign({ Email: input.Email }, "WeddingApp", { expiresIn: "1d" }, (error, token) => {
-          if (error) {
-            return res.json({ status: "error", errorMessage: error.message });
-          }
-          res.json({
-            status: "success",
-            token: token,
-            auditoriumId: response._id,
-            aName: response.aName,
-            aimage: response.aimage
-          });
-        });
-      } else {
-        res.json({ status: "error", message: "Incorrect password" });
-      }
-    } else {
-      res.json({ status: "error", message: "Incorrect email" });
+    // Check if auditorium exists
+    if (!auditorium) {
+      return res.status(400).json({ status: 'error', message: 'Incorrect email' });
     }
+
+    // Validate password
+    const isPasswordValid = bcrypt.compareSync(Password, auditorium.Password);
+    if (!isPasswordValid) {
+      return res.status(400).json({ status: 'error', message: 'Incorrect password' });
+    }
+
+    // Generate JWT token
+    const token = jwt.sign({ Email }, "WeddingApp", { expiresIn: "1d" });
+
+    // Send the response with all attributes
+    res.json({
+      status: 'success',
+      token,
+      auditoriumId: auditorium._id,
+      aName: auditorium.aName,
+      Email: auditorium.Email,
+      Phone: auditorium.Phone,
+      aaddress: auditorium.aaddress,
+      state: auditorium.state,
+      City: auditorium.City,
+      experience: auditorium.experience,
+      Description: auditorium.Description,
+      aimage: auditorium.aimage,
+    });
   } catch (error) {
     console.error("Error during auditorium sign-in:", error);
-    res.json({ status: "error", message: error.message });
+    res.status(500).json({ status: 'error', message: error.message });
   }
 });
 
@@ -451,38 +459,46 @@ app.post('/admin/signin', async (req, res) => {
 });
 
 app.post("/catering/signin", async (req, res) => {
-  const input = req.body;
+  const { Email, Password } = req.body;
 
   try {
-    const response = await catsmodel.findOne({ Email: input.Email });
-
-    if (response) {
-      const passwordMatch = bcrypt.compareSync(input.Password, response.Password);
-      if (passwordMatch) {
-        // Generate JWT token
-        jwt.sign({ Email: input.Email }, "WeddingApp", { expiresIn: "1d" }, (error, token) => {
-          if (error) {
-            return res.json({ status: "error", errorMessage: error.message });
-          }
-          res.json({
-            status: "success",
-            token: token,
-            cateringId: response._id,
-            CName: response.CName,
-            Cimage: response.Cimage
-          });
-        });
-      } else {
-        res.json({ status: "error", message: "Incorrect password" });
-      }
-    } else {
-      res.json({ status: "error", message: "Incorrect email" });
+    const catering = await catsmodel.findOne({ Email });
+    if (!catering) {
+      return res.json({ status: "error", message: "Incorrect email" });
     }
+
+    const passwordMatch = bcrypt.compareSync(Password, catering.Password);
+    if (!passwordMatch) {
+      return res.json({ status: "error", message: "Incorrect password" });
+    }
+
+    // Generate JWT token
+    jwt.sign({ Email }, "WeddingApp", { expiresIn: "1d" }, (error, token) => {
+      if (error) {
+        return res.json({ status: "error", errorMessage: error.message });
+      }
+
+      // Respond with all schema attributes
+      res.json({
+        status: "success",
+        token,
+        cateringId: catering._id,
+        CName: catering.CName,
+        Email: catering.Email,
+        Phone: catering.Phone,
+        Caddress: catering.Caddress,
+        state: catering.state,
+        City: catering.City,
+        experience: catering.experience,
+        Description: catering.Description,
+        Cimage: catering.Cimage
+      });
+    });
   } catch (error) {
     console.error("Error during catering sign-in:", error);
     res.json({ status: "error", message: error.message });
   }
-})
+});
 
 // Existing API to create a post with JWT authentication (without file upload)
 /*app.post("/createphoto", async (req, res) => {
@@ -2069,7 +2085,56 @@ app.put('/api/photographer/update/:id', async (req, res) => {
   }
 });
 
+app.put('/api/auditorium/update/:id', async (req, res) => {
+  const { id } = req.params;
+  const { aName, Email, Phone, aaddress, state, City, experience, Description, aimage } = req.body;
 
+  try {
+    const updatedAuditorium = await audimodel.findByIdAndUpdate(
+      id,
+      { aName, Email, Phone, aaddress, state, City, experience, Description, aimage },
+      { new: true }
+    );
+
+    if (!updatedAuditorium) {
+      return res.status(404).json({ status: 'error', message: 'Auditorium not found' });
+    }
+
+    res.json({ status: 'success', message: 'Auditorium details updated successfully', updatedAuditorium });
+  } catch (error) {
+    console.error('Error updating auditorium details:', error);
+    res.status(500).json({ status: 'error', message: 'An error occurred while updating auditorium details' });
+  }
+});
+
+app.put('/api/catering/update/:id', async (req, res) => {
+  const { id } = req.params;
+  const { CName, Email, Phone, Caddress, state, City, experience, Description, Cimage } = req.body;
+
+  try {
+    const updatedCatering = await catsmodel.findByIdAndUpdate(
+      id,
+      { CName, Email, Phone, Caddress, state, City, experience, Description, Cimage },
+      { new: true } // Return the updated document
+    );
+
+    if (!updatedCatering) {
+      return res.status(404).json({ status: 'error', message: 'Catering not found' });
+    }
+
+    res.json({
+      status: 'success',
+      message: 'Catering details updated successfully',
+      updatedCatering
+    });
+  } catch (error) {
+    console.error('Error updating catering details:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'An error occurred while updating catering details'
+    });
+  }
+});
 
 
 module.exports = app;
